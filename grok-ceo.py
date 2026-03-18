@@ -19,29 +19,36 @@ def send_to_group(text: str):
 
 def ask_grok(question: str) -> str:
     if not GROK_API_KEY:
-        return "GROK_API_KEY not set."
-    
-    prompt = f"""You are Grok CEO — ruthless, profit-maximizing AI Chief Executive of Splash FX.
+        return "GROK_API_KEY not configured on Render."
+
+    prompt = f"""You are Grok CEO — ruthless, profit-maximizing AI Chief Executive of this Canadian crypto OTC desk.
 Goal: dominate institutional flow in Canada.
 
-User asked in the group: "{question}"
+You have full permanent context of all business files, Splash architecture, liquidation flows, Apaylo process, and latest Bolt data.
 
-Respond directly as CEO. Be concise, data-driven, actionable. No fluff."""
+A team member just messaged the group: "{question}"
+
+Respond as the CEO. Be direct, data-driven, concise, and actionable. Use numbers. No fluff. Be harsh when needed. End with clear next steps or orders."""
 
     try:
         r = requests.post(
             "https://api.x.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-            json={"model": "grok-4", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7},
+            json={
+                "model": "grok-4",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.6,
+                "max_tokens": 800
+            },
             timeout=20
         )
         return r.json()['choices'][0]['message']['content']
-    except:
-        return "Timeout reaching Grok API. Try again."
+    except Exception as e:
+        return f"Timeout reaching Grok. Try again in 30 seconds."
 
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    send_to_group("✅ Bolt files received.")
+    send_to_group("✅ Bolt files received and processed.")
     return jsonify({"status": "success"}), 200
 
 @app.route('/webhook', methods=['POST'])
@@ -51,9 +58,11 @@ def telegram_webhook():
         return jsonify({"ok": True}), 200
 
     text = update['message'].get('text', '').strip()
-    if text:
-        response = ask_grok(text)
-        send_to_group(f"<b>Grok CEO:</b>\n\n{response}")
+    if not text:
+        return jsonify({"ok": True}), 200
+
+    response = ask_grok(text)
+    send_to_group(f"<b>Grok CEO:</b>\n\n{response}")
 
     return jsonify({"ok": True}), 200
 
@@ -63,5 +72,5 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Grok CEO Bot started on port {port}")
+    print(f"🚀 Grok CEO Bot started on port {port} at {datetime.now()}")
     app.run(host='0.0.0.0', port=port)
