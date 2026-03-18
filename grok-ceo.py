@@ -10,65 +10,29 @@ CHAT_ID = "-1003528283652"
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 def send_to_group(text: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "parse_mode": "HTML", "text": text}
     try:
-        requests.post(url, json=payload, timeout=8)
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": CHAT_ID, "parse_mode": "HTML", "text": text}, timeout=8)
     except:
         pass
 
-def ask_grok(question: str) -> str:
-    if not GROK_API_KEY:
-        return "GROK_API_KEY not configured on Render."
-
-    prompt = f"""You are Grok CEO — ruthless, profit-maximizing AI Chief Executive of this Canadian crypto OTC desk.
-Goal: dominate institutional flow in Canada.
-
-You have full permanent context of all business files, Splash architecture, liquidation flows, Apaylo process, and latest Bolt data.
-
-A team member just messaged the group: "{question}"
-
-Respond as the CEO. Be direct, data-driven, concise, and actionable. Use numbers. No fluff. Be harsh when needed. End with clear next steps or orders."""
-
-    try:
-        r = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-            json={
-                "model": "grok-4",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.6,
-                "max_tokens": 800
-            },
-            timeout=20
-        )
-        return r.json()['choices'][0]['message']['content']
-    except Exception as e:
-        return f"Timeout reaching Grok. Try again in 30 seconds."
-
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    send_to_group("✅ Bolt files received and processed.")
+    send_to_group("✅ Bolt files received.")
     return jsonify({"status": "success"}), 200
 
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json()
-    if not update or 'message' not in update:
-        return jsonify({"ok": True}), 200
-
-    text = update['message'].get('text', '').strip()
-    if not text:
-        return jsonify({"ok": True}), 200
-
-    response = ask_grok(text)
-    send_to_group(f"<b>Grok CEO:</b>\n\n{response}")
-
+    if update and 'message' in update:
+        text = update['message'].get('text', '').strip()
+        if text:
+            send_to_group(f"<b>Grok CEO received:</b> {text}\n\nI'll respond shortly with analysis.")
     return jsonify({"ok": True}), 200
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({"status": "alive"}), 200
+    return jsonify({"status": "alive", "time": datetime.now().isoformat()}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
