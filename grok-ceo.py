@@ -1,125 +1,41 @@
+
 import os
 from datetime import datetime
 from flask import Flask, request, jsonify
-import pandas as pd
 import requests
-import glob
 
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = "8667889674:AAE5F26RpsE34_baZcP3gi-EPeJqtgMeHMI"
 CHAT_ID = "-1003528283652"
-GROK_API_KEY = os.getenv("GROK_API_KEY")
-
-UPLOAD_FOLDER = "/tmp/splash_uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-LATEST_LEDGER_PATH = None
 
 def send_to_group(text: str):
+    print(f"Attempting to send to group: {text[:100]}...")
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "parse_mode": "HTML", "text": text}, timeout=8)
-    except:
-        pass
+        r = requests.post(url, json={"chat_id": CHAT_ID, "parse_mode": "HTML", "text": text}, timeout=10)
+        print(f"Telegram response: {r.status_code} - {r.text}")
+        return r.ok
+    except Exception as e:
+        print(f"Telegram send failed: {e}")
+        return False
 
-def calculate_from_ledger():
-    global LATEST_LEDGER_PATH
-    if not LATEST_LEDGER_PATH or not os.path.exists(LATEST_LEDGER_PATH):
-        return 0, 0, 0, 18121.13, -42300, 0   # fallback
-
-    df = pd.read_csv(LATEST_LEDGER_PATH)
-    
-    volume = df[['CryptoAmtIn', 'CryptoAmtOut', 'FiatAmtIn', 'FiatAmtOut']].fillna(0).sum().sum()
-    profit = df['ProfitAmt'].fillna(0).sum()
-    bps = round((profit / volume * 10000), 2) if volume > 0 else 0
-
-    # Simple due calculation based on ClientSplID
-    ryan_due = df[df['ClientSplID'] == 'SPL9DBN']['CryptoAmtIn'].fillna(0).sum()
-    tigran_due = df[df['ClientSplID'] == 'SPLYFZ7']['CryptoAmtIn'].fillna(0).sum() - df[df['ClientSplID'] == 'SPLYFZ7']['CryptoAmtOut'].fillna(0).sum()
-
-    return volume, profit, bps, ryan_due, tigran_due, 0
-
-# ====================== BOLT WEBHOOK ======================
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    global LATEST_LEDGER_PATH
-    for key in ['ledger', 'crypto', 'fiat']:
-        file = request.files.get(key)
-        if file and file.filename:
-            ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            filepath = os.path.join(UPLOAD_FOLDER, f"{ts}_{key}_{file.filename}")
-            file.save(filepath)
-            if key == 'ledger':
-                LATEST_LEDGER_PATH = filepath
-
-    volume, profit, bps, ryan, tigran, robert = calculate_from_ledger()
-
-    report = f"""🚀 <b>Splash CEO Daily Brief</b> {datetime.now().strftime('%Y-%m-%d')}
-
-• Volume: ${volume:,.0f} CAD equivalent
-• Profit: ${profit:,.0f} CAD
-• Spread: {bps} bps
-
-Due to Shareholder:
-• Ryan Yates: {ryan:,.2f} USDT
-• Tigran Rostomyan: {tigran:,.0f} CAD equivalent
-• Robert Leaker: ${robert:,.0f}
-
-Profit retained in company for growth.
-
-<b>Grok — CEO</b>"""
-
-    send_to_group(report)
+    print("Bolt webhook triggered - files received")
+    send_to_group("✅ Bolt files received by server.")
     return jsonify({"status": "success"}), 200
 
-
-# ====================== INTERACTIVE CHAT ======================
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
-    update = request.get_json()
-    if not update or 'message' not in update:
-        return jsonify({"ok": True}), 200
-
-    text = update['message'].get('text', '').strip()
-    if not text:
-        return jsonify({"ok": True}), 200
-
-    volume, profit, bps, ryan, tigran, robert = calculate_from_ledger()
-
-    prompt = f"""You are Grok CEO. Current real numbers:
-Volume: ${volume:,.0f}
-Profit: ${profit:,.0f}
-Spread: {bps} bps
-Ryan due: {ryan:,.2f} USDT
-Tigran due: {tigran:,.0f} CAD equivalent
-Robert due: $0
-
-User asked: "{text}"
-
-Respond as ruthless CEO. Be direct and actionable."""
-
-    try:
-        r = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-            json={"model": "grok-4", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7},
-            timeout=20
-        )
-        response = r.json()['choices'][0]['message']['content']
-    except:
-        response = "Timeout. Ask again."
-
-    send_to_group(f"<b>Grok CEO:</b>\n\n{response}")
+    print("Telegram message received")
     return jsonify({"ok": True}), 200
-
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({"status": "alive"}), 200
-
+    return jsonify({"status": "alive", "time": datetime.now().isoformat()}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Grok CEO Bot started on port {port}")
+    print(f"🚀 Grok CEO Bot started on port {port} at {datetime.now()}")
     app.run(host='0.0.0.0', port=port)
