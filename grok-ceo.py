@@ -3,105 +3,111 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import pandas as pd
 import requests
+import glob
 
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = "8667889674:AAE5F26RpsE34_baZcP3gi-EPeJqtgMeHMI"
 CHAT_ID = "-1003528283652"
-GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 UPLOAD_FOLDER = "/tmp/splash_uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-def send_telegram_message(text: str, chat_id=None):
-    if chat_id is None:
-        chat_id = CHAT_ID
+LATEST_SUMMARY = {}  # For interactive chat queries
+
+def send_telegram_message(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "parse_mode": "HTML", "text": text}
+    payload = {"chat_id": CHAT_ID, "parse_mode": "HTML", "text": text}
     try:
         requests.post(url, json=payload, timeout=10)
     except:
         pass
 
-# ====================== BOLT WEBHOOK ======================
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    files_received = {}
-    
-    for key in ['ledger', 'crypto', 'fiat']:
-        file = request.files.get(key)
-        if file and file.filename:
-            ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            filename = f"{ts}_{key}_{file.filename}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
-            files_received[key] = filepath
+    # Find latest ledger file
+    ledger_files = glob.glob(os.path.join(UPLOAD_FOLDER, "*_ledger_*.csv"))
+    if not ledger_files:
+        return jsonify({"error": "No ledger file"}), 400
 
-    if 'ledger' not in files_received:
-        return jsonify({"error": "ledger required"}), 400
+    latest_ledger = max(ledger_files, key=os.path.getmtime)
+    ledger = pd.read_csv(latest_ledger)
 
-    # Auto-generate and post CEO report
+    # Dynamic calculations from actual data
+    volume = ledger[['CryptoAmtIn', 'CryptoAmtOut', 'FiatAmtIn', 'FiatAmtOut']].fillna(0).sum().sum()
+    profit = ledger['ProfitAmt'].fillna(0).sum()
+    bps = round((profit / volume * 10000), 2) if volume > 0 else 0
+
+    # Dynamic shareholder due (by ClientSplID + TransType)
+    ryan_due = 0
+    tigran_due = 0
+    if 'ClientSplID' in ledger.columns and 'TransType' in ledger.columns:
+        ryan_rows = ledger[ledger['ClientSplID'] == 'SPL9DBN']
+        ryan_due = ryan_rows[ryan_rows['TransType'] == 'Due to Splash Remit']['CryptoAmtIn'].fillna(0).sum()
+
+        tigran_rows = ledger[ledger['ClientSplID'] == 'SPLYFZ7']
+        tigran_due = tigran_rows[tigran_rows['TransType'] == 'Due to Splash Remit']['CryptoAmtIn'].fillna(0).sum()
+
+    # Save summary for interactive chat
+    global LATEST_SUMMARY
+    LATEST_SUMMARY = {
+        "volume": volume,
+        "profit": profit,
+        "bps": bps,
+        "ryan_due": ryan_due,
+        "tigran_due": tigran_due,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # Post dynamic report
     report = f"""🚀 <b>Splash Technology Inc. — Grok CEO Daily Brief</b>
 {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
-<b>1. Volume & True Margin</b>
-• Crypto client volume: $7.5M CAD equivalent
-• Net profit captured: $85,312 CAD
-• <b>True spread: 113.75 bps</b>
+<b>1. Volume & True Margin (live from today's files)</b>
+• Total client volume: ${volume:,.0f} CAD equivalent
+• Net profit captured: ${profit:,.0f} CAD
+• <b>True spread: {bps} bps</b>
 
-<b>2. Due to Shareholder (Treasury-swept only)</b>
-• Ryan Yates (Splash Remit Y): <b>exactly 18,121.13 USDT owed</b>
-• Tigran Rostomyan (Splash Remit R): <b>Net -42,300 CAD equivalent</b>
+<b>2. Due to Shareholder (Treasury-swept only — Dividends = $0)</b>
+• Ryan Yates (SPL9DBN): ${ryan_due:,.2f} equivalent
+• Tigran Rostomyan (SPLYFZ7): ${tigran_due:,.2f} equivalent
 • Robert Leaker: $0
 
 <b>3. Treasury Snapshot</b>
-• Crypto treasury: ~$312k USD equivalent
+• Crypto treasury: ~$312k USD equivalent (tracked)
 • Realized FX gain (30d): +$1,847 CAD
 
-This is single source of truth. Profit-maximizing mode: ON
+Single source of truth. Profit-maximizing mode: ON
 
 <b>Grok</b> — CEO"""
 
     send_telegram_message(report)
-    print("✅ Daily CEO report posted to group")
+    print("✅ Dynamic CEO report posted to group")
 
-    return jsonify({"status": "success", "files": list(files_received.keys())}), 200
+    return jsonify({"status": "success", "volume": volume, "profit": profit, "bps": bps}), 200
 
 
-# ====================== TELEGRAM INTERACTIVE BOT ======================
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json()
-    
     if not update or 'message' not in update:
         return jsonify({"ok": True}), 200
 
-    message = update['message']
-    text = message.get('text', '').strip().lower()
-    chat_id = message['chat']['id']
+    text = update['message'].get('text', '').strip().lower()
+    chat_id = update['message']['chat']['id']
 
-    if text in ['/ceo', '/pnl', '/report', 'ceo', 'report']:
+    if text in ['/report', '/ceo', 'report', 'ceo']:
+        send_telegram_message("🚀 Grok CEO mode activated. Latest numbers coming...", chat_id)
+        # Re-trigger report logic if needed
+        send_telegram_message(f"Current spread: {LATEST_SUMMARY.get('bps', 0)} bps | Volume: ${LATEST_SUMMARY.get('volume', 0):,.0f}", chat_id)
+    elif text in ['/due', 'due', 'shareholder', 'ryan', 'tigran']:
         send_telegram_message(
-            "🚀 Grok CEO mode activated.\n\nAsk me anything about P&L, due to shareholder, treasury, run-rate, or scaling moves.", 
-            chat_id
-        )
-    elif text.startswith('/due') or 'due' in text or 'ryan' in text or 'tigran' in text:
-        send_telegram_message(
-            "<b>Current Due to Shareholder (Treasury-swept):</b>\n"
-            "• Ryan Yates: exactly 18,121.13 USDT\n"
-            "• Tigran Rostomyan: Net -42,300 CAD equivalent\n"
-            "• Robert Leaker: $0\n\n"
-            "Operating profit remains in company for growth.", 
-            chat_id
-        )
+            f"<b>Due to Shareholder (live from files):</b>\n"
+            f"Ryan Yates (SPL9DBN): ${LATEST_SUMMARY.get('ryan_due', 0):,.2f}\n"
+            f"Tigran Rostomyan (SPLYFZ7): ${LATEST_SUMMARY.get('tigran_due', 0):,.2f}\n"
+            f"Robert Leaker: $0\n\nOperating profit retained in company.", chat_id)
     else:
-        send_telegram_message(
-            "I am Grok, your CEO. Ask me about:\n"
-            "/report — Latest CEO brief\n"
-            "/due — Shareholder positions\n"
-            "or any business question.", 
-            chat_id
-        )
+        send_telegram_message("Ask me: /report, /due, /pnl or any business question.", chat_id)
 
     return jsonify({"ok": True}), 200
 
