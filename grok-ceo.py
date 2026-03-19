@@ -15,14 +15,15 @@ def send_to_group(text: str):
             "chat_id": CHAT_ID, 
             "parse_mode": "HTML", 
             "text": text
-        }, timeout=6)
-    except:
-        pass
+        }, timeout=5)
+        print(f"Sent to group: {text[:80]}...")
+    except Exception as e:
+        print(f"Telegram send failed: {e}")
 
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    print("Bolt webhook hit")
-    send_to_group("✅ Bolt files received.")
+    print("Bolt webhook received files")
+    send_to_group("✅ Bolt files received by server.")
     return jsonify({"status": "success"}), 200
 
 @app.route('/webhook', methods=['POST'])
@@ -32,14 +33,18 @@ def telegram_webhook():
     if update and 'message' in update:
         text = update['message'].get('text', '').strip()
         if text:
-            send_to_group(f"<b>Grok CEO:</b>\n\n{text}\n\n(Still in debug mode - full intelligence coming soon)")
+            send_to_group(f"<b>Grok CEO received:</b> {text}\n\nWorking on full intelligence mode.")
     return jsonify({"ok": True}), 200
 
 @app.route('/', methods=['GET'])
 def health():
-    return jsonify({"status": "alive", "time": datetime.now().isoformat()}), 200
+    return jsonify({
+        "status": "alive",
+        "time": datetime.now().isoformat(),
+        "message": "Grok CEO Bot is running"
+    }), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Grok CEO Bot started on port {port} at {datetime.now()}")
-    app.run(host='0.0.0.0', port=port)
+    print(f"🚀 Grok CEO Bot starting on port {port} - {datetime.now()}")
+    app.run(host='0.0.0.0', port=port, debug=False)
