@@ -25,6 +25,12 @@ def send_to_group(text: str):
 
 def get_latest_numbers():
     global LATEST_LEDGER_PATH
+    
+    # Find the most recent ledger file
+    ledger_files = glob.glob(os.path.join(UPLOAD_FOLDER, "*_ledger_*.csv"))
+    if ledger_files:
+        LATEST_LEDGER_PATH = max(ledger_files, key=os.path.getmtime)
+
     if not LATEST_LEDGER_PATH or not os.path.exists(LATEST_LEDGER_PATH):
         return 0, 0, 0, 18121.13, -42300, 0
 
@@ -35,28 +41,16 @@ def get_latest_numbers():
         bps = round((profit / volume * 10000), 2) if volume > 0 else 0
 
         ryan_due = df[df.get('ClientSplID') == 'SPL9DBN']['CryptoAmtIn'].fillna(0).sum()
-        tigran_due = df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtIn'].fillna(0).sum() - df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtOut'].fillna(0).sum()
+        tigran_due = df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtIn'].fillna(0).sum() - \
+                     df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtOut'].fillna(0).sum()
 
         return volume, profit, bps, ryan_due, tigran_due, 0
-    except Exception as e:
-        print(f"Calculation error: {e}")
+    except:
         return 0, 0, 0, 18121.13, -42300, 0
 
-# ====================== BOLT WEBHOOK ======================
 @app.route('/webhook/bolt', methods=['POST'])
 def bolt_webhook():
-    global LATEST_LEDGER_PATH
-    for key in ['ledger', 'crypto', 'fiat']:
-        file = request.files.get(key)
-        if file and file.filename:
-            ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            filepath = os.path.join(UPLOAD_FOLDER, f"{ts}_{key}_{file.filename}")
-            file.save(filepath)
-            if key == 'ledger':
-                LATEST_LEDGER_PATH = filepath
-
     volume, profit, bps, ryan, tigran, robert = get_latest_numbers()
-
     report = f"""🚀 <b>Splash CEO Daily Brief</b> {datetime.now().strftime('%Y-%m-%d')}
 
 • Volume: ${volume:,.0f} CAD equivalent
@@ -71,12 +65,9 @@ Due to Shareholder:
 Profit retained in company for growth.
 
 <b>Grok — CEO</b>"""
-
     send_to_group(report)
     return jsonify({"status": "success"}), 200
 
-
-# ====================== TELEGRAM INTERACTIVE ======================
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json(silent=True)
@@ -89,7 +80,7 @@ def telegram_webhook():
 
     volume, profit, bps, ryan, tigran, robert = get_latest_numbers()
 
-    prompt = f"""You are Grok CEO. Current real numbers from latest Bolt files:
+    prompt = f"""You are Grok CEO. Current real numbers:
 Volume: ${volume:,.0f}
 Profit: ${profit:,.0f}
 Spread: {bps} bps
@@ -115,11 +106,9 @@ Respond as ruthless CEO. Be direct, concise, actionable. Use the real numbers.""
     send_to_group(f"<b>Grok CEO:</b>\n\n{response}")
     return jsonify({"ok": True}), 200
 
-
 @app.route('/', methods=['GET'])
 def health():
     return jsonify({"status": "alive"}), 200
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
