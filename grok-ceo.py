@@ -35,11 +35,11 @@ def get_latest_numbers():
         bps = round((profit / volume * 10000), 2) if volume > 0 else 0
 
         ryan_due = df[df.get('ClientSplID') == 'SPL9DBN']['CryptoAmtIn'].fillna(0).sum()
-        tigran_due = df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtIn'].fillna(0).sum() - \
-                     df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtOut'].fillna(0).sum()
+        tigran_due = df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtIn'].fillna(0).sum() - df[df.get('ClientSplID') == 'SPLYFZ7']['CryptoAmtOut'].fillna(0).sum()
 
         return volume, profit, bps, ryan_due, tigran_due, 0
-    except:
+    except Exception as e:
+        print(f"Calculation error: {e}")
         return 0, 0, 0, 18121.13, -42300, 0
 
 # ====================== BOLT WEBHOOK ======================
@@ -76,7 +76,7 @@ Profit retained in company for growth.
     return jsonify({"status": "success"}), 200
 
 
-# ====================== TELEGRAM CHAT ======================
+# ====================== TELEGRAM INTERACTIVE ======================
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json(silent=True)
@@ -89,10 +89,9 @@ def telegram_webhook():
 
     volume, profit, bps, ryan, tigran, robert = get_latest_numbers()
 
-    # Forward to Grok for intelligent response
     prompt = f"""You are Grok CEO. Current real numbers from latest Bolt files:
-Volume: ${volume:,.0f} CAD
-Profit: ${profit:,.0f} CAD
+Volume: ${volume:,.0f}
+Profit: ${profit:,.0f}
 Spread: {bps} bps
 Ryan due: {ryan:,.2f} USDT
 Tigran due: {tigran:,.0f} CAD equivalent
@@ -100,13 +99,13 @@ Robert due: $0
 
 User asked: "{text}"
 
-Respond as ruthless CEO. Be direct, concise, actionable."""
+Respond as ruthless CEO. Be direct, concise, actionable. Use the real numbers."""
 
     try:
         r = requests.post(
             "https://api.x.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROK_API_KEY}"},
-            json={"model": "grok-4", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7},
+            json={"model": "grok-4", "messages": [{"role": "user", "content": prompt}], "temperature": 0.65},
             timeout=20
         )
         response = r.json()['choices'][0]['message']['content']
